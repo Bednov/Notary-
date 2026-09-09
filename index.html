@@ -1,1 +1,399 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>PRO Нотариус 2026</title>
 
+  <!-- Парсеры Mammoth (DOCX) и SheetJS (XLSX) -->
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #0b1329;
+      --card-bg: #162238;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-blue: #2563eb;
+      --accent-cyan: #38bdf8;
+      --success-green: #10b981;
+      --error-red: #ef4444;
+      --warning-amber: #f59e0b;
+      --border-color: #334155;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      width: 100%; height: 100dvh; margin: 0; padding: 0;
+      background-color: var(--bg-color); color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    #app-container {
+      display: flex; flex-direction: column; width: 100%; height: 100dvh;
+      padding-top: max(8px, env(safe-area-inset-top));
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      padding-left: max(10px, env(safe-area-inset-left));
+      padding-right: max(10px, env(safe-area-inset-right));
+    }
+
+    .header-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 6px; background: var(--card-bg); border: 1px solid var(--border-color);
+      padding: 6px 10px; border-radius: 12px; flex-shrink: 0; gap: 4px;
+    }
+
+    .brand-title {
+      font-size: 0.85em; font-weight: 800; color: var(--accent-cyan);
+      padding: 6px 10px; border-radius: 8px;
+      background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .pill-btn {
+      background: #1e293b; border: 1px solid var(--border-color); color: var(--text-main);
+      padding: 6px 10px; border-radius: 16px; font-size: 0.72em; font-weight: 600; cursor: pointer;
+    }
+
+    .global-progress-wrapper {
+      background: var(--card-bg); border: 1px solid var(--border-color);
+      border-radius: 10px; padding: 6px 10px; margin-bottom: 6px; flex-shrink: 0;
+    }
+    .progress-info-row { display: flex; justify-content: space-between; font-size: 0.7em; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; }
+    .progress-bar-bg { width: 100%; height: 8px; background: #0f172a; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color); }
+    .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); border-radius: 4px; transition: width 0.4s ease; }
+
+    .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
+    .stat-box { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 6px 2px; text-align: center; }
+    .stat-number { font-size: 1.1em; font-weight: 800; }
+    .stat-label { font-size: 0.65em; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+
+    .quiz-card {
+      flex: 1; background: var(--card-bg); border: 1px solid var(--border-color);
+      border-radius: 14px; padding: 12px; margin-bottom: 6px;
+      display: flex; flex-direction: column; overflow-y: auto; min-height: 0;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .meta-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-shrink: 0; }
+    .topic-badge { background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 8px; border-radius: 6px; font-size: 0.7em; font-weight: 700; }
+    .counter-badge { font-size: 0.75em; color: var(--text-muted); font-weight: 700; }
+
+    .question-text { font-size: 0.95em; font-weight: 700; line-height: 1.35; color: #ffffff; margin-bottom: 12px; white-space: pre-line; }
+    .answers-container { display: flex; flex-direction: column; gap: 6px; }
+
+    .opt-button {
+      background: #1e293b; border: 1px solid var(--border-color); color: #f1f5f9;
+      padding: 10px 12px; border-radius: 10px; text-align: left; font-size: 0.88em;
+      font-weight: 500; line-height: 1.3; cursor: pointer; transition: background 0.2s ease;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .key-hint {
+      background: rgba(255, 255, 255, 0.1); border: 1px solid var(--border-color);
+      border-radius: 4px; padding: 1px 5px; font-size: 0.75em; color: var(--accent-cyan);
+      font-weight: 700; flex-shrink: 0;
+    }
+    .opt-button.correct { background: rgba(16, 185, 129, 0.25) !important; border-color: var(--success-green) !important; color: #34d399 !important; font-weight: 700; }
+    .opt-button.wrong { background: rgba(239, 68, 68, 0.25) !important; border-color: var(--error-red) !important; color: #fca5a5 !important; }
+
+    .bottom-nav { display: flex; gap: 6px; flex-shrink: 0; }
+    .nav-btn { flex: 1; background: var(--accent-blue); color: #ffffff; border: none; padding: 12px 6px; border-radius: 10px; font-weight: 700; font-size: 0.85em; cursor: pointer; text-align: center; }
+    .nav-btn.secondary { background: #334155; }
+
+    #loader-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-color); z-index: 200; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; text-align: center; }
+    .spinner { width: 40px; height: 40px; border: 4px solid var(--border-color); border-top: 4px solid var(--accent-cyan); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div id="loader-overlay">
+  <div class="spinner"></div>
+  <h3 style="color: var(--accent-cyan); margin: 0 0 8px 0;">Загрузка полной базы вопросов...</h3>
+  <div id="load-status-text" style="font-size: 0.85em; color: var(--text-muted);">Инициализация...</div>
+</div>
+
+<div id="app-container">
+  <header class="header-bar">
+    <div class="brand-title">⚖️ Нотариус Pro 2026</div>
+    <div style="display: flex; gap: 4px;">
+      <button class="pill-btn" onclick="resetFullState()" style="color: var(--error-red);">🗑️ Сброс</button>
+    </div>
+  </header>
+
+  <section class="global-progress-wrapper">
+    <div class="progress-info-row">
+      <span>🚀 Прогресс всей базы:</span>
+      <span id="ui-global-progress-text" style="color: var(--accent-cyan);">0 / 0</span>
+    </div>
+    <div class="progress-bar-bg"><div id="ui-global-progress-bar" class="progress-bar-fill"></div></div>
+  </section>
+
+  <section class="dashboard-grid">
+    <div class="stat-box"><div class="stat-number" id="ui-answered-count" style="color: var(--accent-cyan);">0</div><div class="stat-label">Отвечено</div></div>
+    <div class="stat-box"><div class="stat-number" id="ui-accuracy-rate" style="color: var(--success-green);">0%</div><div class="stat-label">Точность</div></div>
+    <div class="stat-box"><div class="stat-number" id="ui-errors-count" style="color: var(--error-red);">0</div><div class="stat-label">❌ Ошибки</div></div>
+    <div class="stat-box"><div class="stat-number" id="ui-progress-pos" style="color: var(--warning-amber);">1 / 0</div><div class="stat-label">Позиция</div></div>
+  </section>
+
+  <article class="quiz-card" id="quiz-card-element">
+    <div class="meta-bar">
+      <span class="topic-badge" id="ui-topic-tag">📌 Файл</span>
+      <span class="counter-badge" id="ui-question-counter">0 / 0</span>
+    </div>
+    <div id="dynamic-content-root"></div>
+  </article>
+
+  <footer class="bottom-nav">
+    <button class="nav-btn secondary" onclick="navigatePrevious()">⬅️ Назад (←)</button>
+    <button class="nav-btn secondary" onclick="triggerShuffleBlock()">🔀 Перемешать</button>
+    <button class="nav-btn" onclick="navigateNext()">Вперёд (→ / Space) ➡️</button>
+  </footer>
+</div>
+
+<script>
+  const FILE_MANIFEST = [
+    { name: "1.docx", type: "docx" },
+    { name: "2.docx", type: "docx" },
+    { name: "3.docx", type: "docx" },
+    { name: "etalon.docx", type: "docx" },
+    { name: "questions2020.xlsx", type: "xlsx" },
+    { name: "questions2021.docx", type: "docx" },
+    { name: "tests2021.docx", type: "docx" },
+    { name: "tests2023.docx", type: "docx" },
+    { name: "zadachi.docx", type: "docx" }
+  ];
+
+  let MASTER_DATABASE = [];
+  let CurrentRenderedShuffledOptions = [];
+  let isAnswered = false;
+
+  let AppState = JSON.parse(localStorage.getItem('notary_app_state_v2')) || {
+    currentIndex: 0,
+    totalAnswered: 0,
+    correctCount: 0,
+    errorCount: 0
+  };
+
+  async function loadAllRepoFiles() {
+    let globalId = 1;
+    for (let f of FILE_MANIFEST) {
+      document.getElementById('load-status-text').innerText = `Загрузка: ${f.name}...`;
+      try {
+        let resp = await fetch(f.name);
+        if (!resp.ok) continue;
+        let blob = await resp.blob();
+
+        if (f.type === 'docx') {
+          let arrayBuffer = await blob.arrayBuffer();
+          let result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+          let parsed = parseTextToQuestions(result.value, f.name, globalId);
+          MASTER_DATABASE.push(...parsed);
+          globalId += parsed.length;
+        } else if (f.type === 'xlsx') {
+          let arrayBuffer = await blob.arrayBuffer();
+          let workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          let sheetName = workbook.SheetNames[0];
+          let json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+          let parsed = parseXlsxToQuestions(json, f.name, globalId);
+          MASTER_DATABASE.push(...parsed);
+          globalId += parsed.length;
+        }
+      } catch (e) {
+        console.error("Ошибка чтения файла " + f.name, e);
+      }
+    }
+
+    document.getElementById('loader-overlay').style.display = 'none';
+
+    if (MASTER_DATABASE.length === 0) {
+      alert("Не удалось загрузить базу. Проверьте переименование файлов questions2020.xlsx и etalon.docx!");
+      return;
+    }
+
+    if (AppState.currentIndex >= MASTER_DATABASE.length) AppState.currentIndex = 0;
+    renderCurrentQuestion();
+  }
+
+  function parseTextToQuestions(rawText, sourceName, startId) {
+    let lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    let items = [];
+    let currentQ = null;
+
+    lines.forEach((line) => {
+      if (line.match(/^\d+[\.\)]/)) {
+        if (currentQ && currentQ.options.length >= 2) items.push(currentQ);
+        currentQ = {
+          id: startId++,
+          topic: sourceName,
+          question: line.replace(/^\d+[\.\)]\s*/, ''),
+          options: [],
+          correctText: ""
+        };
+      } else if (currentQ) {
+        let isCorrect = line.startsWith('+') || line.startsWith('*');
+        let cleanText = line.replace(/^[\+\*]\s*/, '');
+        currentQ.options.push(cleanText);
+        if (isCorrect || currentQ.options.length === 1) {
+          currentQ.correctText = cleanText;
+        }
+      }
+    });
+    if (currentQ && currentQ.options.length >= 2) items.push(currentQ);
+    return items;
+  }
+
+  function parseXlsxToQuestions(rows, sourceName, startId) {
+    let items = [];
+    rows.forEach((row, idx) => {
+      if (idx === 0 || !row[0]) return;
+      let qText = String(row[0]).trim();
+      let opts = [];
+      for (let i = 1; i <= 4; i++) {
+        if (row[i]) opts.push(String(row[i]).trim());
+      }
+      if (opts.length >= 2) {
+        items.push({
+          id: startId++,
+          topic: sourceName,
+          question: qText,
+          options: opts,
+          correctText: opts[0]
+        });
+      }
+    });
+    return items;
+  }
+
+  function renderCurrentQuestion() {
+    isAnswered = false;
+    if (MASTER_DATABASE.length === 0) return;
+    const q = MASTER_DATABASE[AppState.currentIndex];
+
+    document.getElementById('ui-topic-tag').innerText = q.topic;
+    document.getElementById('ui-question-counter').innerText = `${AppState.currentIndex + 1} / ${MASTER_DATABASE.length}`;
+
+    // Рандомизация ответов для защиты от визуального заучивания
+    CurrentRenderedShuffledOptions = [...q.options].sort(() => Math.random() - 0.5);
+
+    const isDesktop = window.innerWidth > 768;
+    const root = document.getElementById('dynamic-content-root');
+
+    let optionsHTML = CurrentRenderedShuffledOptions.map((optText, idx) => {
+      let keyLabel = isDesktop ? `<span class="key-hint">${idx + 1}</span>` : '';
+      return `
+        <button class="opt-button" data-idx="${idx}" onclick="handleOptionSelect(${idx}, this)">
+          ${keyLabel} <span>${optText}</span>
+        </button>
+      `;
+    }).join('');
+
+    root.innerHTML = `
+      <div class="question-text">${q.question}</div>
+      <div class="answers-container">${optionsHTML}</div>
+    `;
+
+    saveState();
+    renderDashboardUI();
+  }
+
+  function handleOptionSelect(selectedIdx, btnElement) {
+    if (isAnswered) return;
+    isAnswered = true;
+
+    const q = MASTER_DATABASE[AppState.currentIndex];
+    const selectedText = CurrentRenderedShuffledOptions[selectedIdx];
+    const isCorrect = (selectedText === q.correctText);
+
+    AppState.totalAnswered++;
+    const allButtons = document.querySelectorAll('.opt-button');
+
+    if (isCorrect) {
+      AppState.correctCount++;
+      if (btnElement) btnElement.classList.add('correct');
+      setTimeout(navigateNext, 400);
+    } else {
+      AppState.errorCount++;
+      if (btnElement) btnElement.classList.add('wrong');
+      // Подсвечиваем истинный правильный вариант
+      allButtons.forEach((btn, idx) => {
+        if (CurrentRenderedShuffledOptions[idx] === q.correctText) {
+          btn.classList.add('correct');
+        }
+      });
+    }
+
+    saveState();
+    renderDashboardUI();
+  }
+
+  function navigateNext() {
+    if (AppState.currentIndex < MASTER_DATABASE.length - 1) AppState.currentIndex++;
+    else AppState.currentIndex = 0;
+    renderCurrentQuestion();
+  }
+
+  function navigatePrevious() {
+    if (AppState.currentIndex > 0) AppState.currentIndex--;
+    renderCurrentQuestion();
+  }
+
+  function triggerShuffleBlock() {
+    MASTER_DATABASE.sort(() => Math.random() - 0.5);
+    AppState.currentIndex = 0;
+    renderCurrentQuestion();
+  }
+
+  function resetFullState() {
+    if (confirm("Сбросить всю статистику и вернуться к 1-му вопросу?")) {
+      localStorage.removeItem('notary_app_state_v2');
+      AppState = { currentIndex: 0, totalAnswered: 0, correctCount: 0, errorCount: 0 };
+      renderCurrentQuestion();
+    }
+  }
+
+  function saveState() {
+    localStorage.setItem('notary_app_state_v2', JSON.stringify(AppState));
+  }
+
+  function renderDashboardUI() {
+    document.getElementById('ui-answered-count').innerText = AppState.totalAnswered;
+    document.getElementById('ui-errors-count').innerText = AppState.errorCount;
+    let accuracy = AppState.totalAnswered > 0 ? Math.round((AppState.correctCount / AppState.totalAnswered) * 100) : 0;
+    document.getElementById('ui-accuracy-rate').innerText = accuracy + '%';
+    document.getElementById('ui-progress-pos').innerText = `${AppState.currentIndex + 1} / ${MASTER_DATABASE.length}`;
+
+    let total = MASTER_DATABASE.length;
+    let percent = total > 0 ? Math.round(((AppState.currentIndex + 1) / total) * 100) : 0;
+    document.getElementById('ui-global-progress-text').innerText = `${AppState.currentIndex + 1} / ${total}`;
+    document.getElementById('ui-global-progress-bar').style.width = percent + '%';
+  }
+
+  // Обработчик горячих клавиш для ноутбуков / компьютеров
+  window.addEventListener('keydown', (e) => {
+    // Нажатие цифр 1, 2, 3, 4 (в основном блоке и Numpad)
+    if (['1', '2', '3', '4'].includes(e.key)) {
+      let idx = parseInt(e.key) - 1;
+      let btn = document.querySelectorAll('.opt-button')[idx];
+      if (btn) handleOptionSelect(idx, btn);
+    } 
+    // Нажатие Стрелки Вправо или Пробела -> Следующий вопрос
+    else if (e.key === 'ArrowRight' || e.key === ' ') {
+      e.preventDefault();
+      navigateNext();
+    } 
+    // Нажатие Стрелки Влево -> Предыдущий вопрос
+    else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      navigatePrevious();
+    }
+  });
+
+  window.onload = loadAllRepoFiles;
+</script>
+</body>
+</html>
