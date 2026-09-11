@@ -109,6 +109,7 @@
 
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 19, 41, 0.96); backdrop-filter: blur(10px); z-index: 100; display: none; flex-direction: column; padding: 16px; overflow-y: auto; }
     .topic-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+    .block-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-top: 8px; }
     .block-btn { background: #1e293b; border: 1px solid var(--border-color); color: var(--accent-cyan); padding: 8px; border-radius: 8px; text-align: center; font-size: 0.8em; font-weight: 700; cursor: pointer; }
 
     .result-screen { text-align: center; padding: 20px 10px; }
@@ -151,7 +152,7 @@
       <span class="counter-badge" id="ui-question-counter">0 / 0</span>
     </div>
     <div id="dynamic-content-root">
-      <div style="text-align: center; padding: 25px; color: var(--accent-cyan);">⏳ Сканирование всех вертикальных блоков базы...</div>
+      <div style="text-align: center; padding: 25px; color: var(--accent-cyan);">⏳ Считываем файлы билетов и тестов...</div>
     </div>
   </article>
 
@@ -175,7 +176,6 @@
   let isTransitioning = false; 
 
   function generateLegalBasis(qText) {
-    if (!qText) return { rule: "Основы нотариата РФ", logic: "Стандартный вопрос квалификационного экзамена." };
     const text = qText.toLowerCase();
     if (text.includes("наследств") || text.includes("завещ") || text.includes("открыт")) {
       return { rule: "Гражданский кодекс РФ (Раздел V. Наследственное право)", logic: "Регулирует порядок наследования, пресекательные сроки принятия и права обязательных наследников." };
@@ -201,7 +201,6 @@
   let examCountdown = null;
   let examTimeLeft = 3600; 
   let examScore = { testPoints: 0, taskPoint: 0, argPoints: 0 };
-  let answeredInCurrentQuestion = false;
 
   function syncStateToStorage() {
     SavedProgressState.totalAnswered = AppState.totalAnswered;
@@ -287,21 +286,22 @@
 
   function setArgumentationPoints(points) {
     examScore.argPoints = points;
-    const elem = document.getElementById('arg-status');
-    if (elem) elem.innerText = `Начислено: ${points} б.`;
+    document.getElementById('arg-status').innerText = `Начислено: ${points} б.`;
   }
 
+  /* ЖЕЛЕЗОБЕТОННЫЙ ЛИНЕЙНЫЙ ПАРСЕР ПОД ИЗМЕНЕННЫЕ ЛАТИНСКИЕ ИМЕНА */
   async function loadExcelAndInit() {
     if (typeof XLSX === 'undefined' || typeof mammoth === 'undefined') {
-      setTimeout(loadExcelAndInit, 300);
+      setTimeout(loadExcelAndInit, 400);
       return;
     }
 
+    // Восстанавливаем прошлые сохраненные очки
     AppState.totalAnswered = SavedProgressState.totalAnswered;
     AppState.correctCount = SavedProgressState.correctCount;
     AppState.errorIds = SavedProgressState.errorIds;
 
-    // 1. Считывание tasks.docx
+    // 1. Чтение переименованного файла задач tasks.docx
     try {
       const respDoc = await fetch('tasks.docx');
       if (respDoc.ok) {
@@ -341,9 +341,9 @@
             ruleText = block.split("<Обоснование ответа>:")[1].split("<")[0].trim();
           }
 
-          if (qPart.length > 5) {
+          if (qPart.length > 10) {
             TASKS_DATABASE.push({
-              id: 500000 + idx,
+              id: 5000 + idx,
               topic: "📋 Задачи квалификационного экзамена",
               question: qPart,
               options: options,
@@ -355,120 +355,65 @@
       }
     } catch(e) { console.log(e); }
 
-    // 2. Универсальный вертикально-потоковый парсер database.xlsx по всем листам
+    // 2. Чтение переименованного файла тестов database.xlsx
     try {
       const respXls = await fetch('database.xlsx');
       if (respXls.ok) {
         const buf = await respXls.arrayBuffer();
-        const wb = XLSX.read(buf, { type: 'array', cellDates: false, cellText: false });
+        const wb = XLSX.read(buf, { type: 'array' });
+        const rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-        wb.SheetNames.forEach((sheetName) => {
-          const sheet = wb.Sheets[sheetName];
-          if (!sheet) return;
-
-          const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
-          let flatTextList = [];
-
-          // Собираем все непустые ячейки со всех колонок сверху вниз
-          rawRows.forEach(row => {
-            row.forEach(cell => {
-              let val = String(cell || "").trim();
-              if (val.length > 0) flatTextList.push(val);
-            });
+        RAW_EXCEL_TESTS = rawData.map((row, idx) => {
+          const options = [];
+          ['Ответ №1', 'Ответ №2', 'Ответ №3', 'Ответ №4'].forEach(col => {
+            if (row[col] && String(row[col]).trim() !== '') options.push(String(row[col]).trim());
           });
 
-          let currentQ = null;
-          let currentOpts = [];
-          let currentCorrect = 0;
+          const correctIdx = row['Правильные ответы'] ? parseInt(row['Правильные ответы']) - 1 : 0;
+          const qText = String(row['Вопрос'] || '').trim();
 
-          flatTextList.forEach((text) => {
-            // Определяем, является ли строка началом вопроса (длинная строка или содержит номер)
-            let isQuestionStart = text.length > 25 && !/^[1-4][\.\)]/.test(text) && !/^ответ/i.test(text);
-
-            if (isQuestionStart && text.length > 40 && currentOpts.length >= 2) {
-              if (currentQ) {
-                RAW_EXCEL_TESTS.push({
-                  id: RAW_EXCEL_TESTS.length + 1000,
-                  topic: sheetName.includes("Sheet") ? "Общая база нотариата" : sheetName,
-                  question: currentQ,
-                  options: currentOpts,
-                  correct: (currentCorrect >= 0 && currentCorrect < currentOpts.length) ? currentCorrect : 0,
-                  legalBasis: generateLegalBasis(currentQ)
-                });
-              }
-              currentQ = text;
-              currentOpts = [];
-              currentCorrect = 0;
-            } else if (/^[1-4][\.\)]/.test(text) || (currentQ && currentOpts.length < 4 && text.length < 150)) {
-              let clean = text.replace(/^[1-4][\.\)]\s*/, '').trim();
-              if (clean.length > 0) currentOpts.push(clean);
-            } else if (/^прав\.? ответ|^ответ/i.test(text)) {
-              let match = text.match(/[1-4]/);
-              if (match) currentCorrect = parseInt(match[0]) - 1;
-            } else if (!currentQ) {
-              currentQ = text;
-            } else if (currentOpts.length < 4) {
-              currentOpts.push(text);
-            }
-          });
-
-          // Сохраняем последний вопрос листа
-          if (currentQ && currentOpts.length >= 2) {
-            RAW_EXCEL_TESTS.push({
-              id: RAW_EXCEL_TESTS.length + 1000,
-              topic: sheetName.includes("Sheet") ? "Общая база нотариата" : sheetName,
-              question: currentQ,
-              options: currentOpts,
-              correct: (currentCorrect >= 0 && currentCorrect < currentOpts.length) ? currentCorrect : 0,
-              legalBasis: generateLegalBasis(currentQ)
-            });
-          }
-        });
+          return {
+            id: row['Ид. №.1'] || (1000 + idx),
+            topic: `Раздел ${row['Тема'] || 'Общая база'}`,
+            question: qText,
+            options: options,
+            correct: correctIdx >= 0 && correctIdx < options.length ? correctIdx : 0,
+            legalBasis: generateLegalBasis(qText)
+          };
+        }).filter(q => q.question && q.options.length > 0);
       }
-    } catch(e) { console.log("Ошибка парсинга Excel:", e); }
+    } catch(e) { console.log(e); }
 
-    // 3. Дополнительно считываем tests2023.docx
+    // 3. Чтение переименованного файла тестов tests2023.docx
     try {
       const respDoc2 = await fetch('tests2023.docx');
       if (respDoc2.ok) {
         const buf = await respDoc2.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer: buf });
         const text = result.value;
-        const rawLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+        const rawLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5);
         
-        let currentQText = "";
+        let currentQ = "";
         let currentOpts = [];
         
         rawLines.forEach((line, i) => {
-          let isOpt = /^a\.|^b\.|^c\.|^d\.|^□|^[1-4]\)/i.test(line);
-          if (!isOpt && line.length > 12) {
-            if (currentQText && currentOpts.length > 1) {
+          if (line.includes("Выберите один") || line.length > 50 && !line.startsWith("a.") && !line.startsWith("b.") && !line.startsWith("□")) {
+            if (currentQ && currentOpts.length > 0) {
               RAW_EXCEL_TESTS.push({
-                id: 800000 + i,
+                id: 9000 + i,
                 topic: "Тесты 2023 года",
-                question: currentQText,
+                question: currentQ,
                 options: currentOpts,
                 correct: 0,
-                legalBasis: generateLegalBasis(currentQText)
+                legalBasis: generateLegalBasis(currentQ)
               });
             }
-            currentQText = line.replace("Выберите один или несколько ответов:", "").trim();
+            currentQ = line.replace("Выберите один или несколько ответов:", "").trim();
             currentOpts = [];
-          } else if (isOpt) {
-            currentOpts.push(line.replace(/^[a-d]\.\s*|□\s*|^[1-4]\)\s*/i, '').trim());
+          } else if (line.startsWith("a.") || line.startsWith("b.") || line.startsWith("c.") || line.startsWith("□")) {
+            currentOpts.push(line.replace(/^[a-d]\.\s*|□\s*/i, '').trim());
           }
         });
-
-        if (currentQText && currentOpts.length > 1) {
-          RAW_EXCEL_TESTS.push({
-            id: 899999,
-            topic: "Тесты 2023 года",
-            question: currentQText,
-            options: currentOpts,
-            correct: 0,
-            legalBasis: generateLegalBasis(currentQText)
-          });
-        }
       }
     } catch(e) {}
 
@@ -487,15 +432,15 @@
       return;
     }
 
+    // Если файлы успешно прочитались, убираем дефолтную заглушку и склеиваем полную базу
     if (tests.length > 0 || tasks.length > 0) {
       let mixedPool = [];
       tests.forEach(q => mixedPool.push({ ...q, isTaskItem: false }));
-      if (!filterTopic) {
-        tasks.forEach(t => mixedPool.push({ ...t, isTaskItem: true }));
-      }
+      tasks.forEach(t => mixedPool.push({ ...t, isTaskItem: true }));
+      
       AppState.sessionQueue = mixedPool.sort(() => Math.random() - 0.5);
     } else {
-      AppState.sessionQueue = [{ id: 0, topic: "Инфо", question: "Ошибка: данные не прочитаны.", options: ["Ок"], correct: 0, legalBasis: {rule: "-", logic: "-"} }];
+      AppState.sessionQueue = [{ id: 0, topic: "Инфо", question: "Ошибка: файлы базы данных не найдены на сервере GitHub. Проверьте имена.", options: ["Ок"], correct: 0, legalBasis: {rule: "-", logic: "-"} }];
     }
     
     AppState.currentIndex = 0;
@@ -510,14 +455,13 @@
   function startErrorReviewSession() {
     if (AppState.errorIds.length === 0) { alert("Список ошибок пуст!"); return; }
     let errorQuestions = [...RAW_EXCEL_TESTS, ...TASKS_DATABASE].filter(q => AppState.errorIds.includes(q.id));
-    AppState.sessionQueue = errorQuestions.map(q => ({ ...q, topic: "❌ Проработка ошибок", isTaskItem: q.id >= 500000 }));
+    AppState.sessionQueue = errorQuestions.map(q => ({ ...q, topic: "❌ Проработка ошибок", isTaskItem: q.id >= 5000 }));
     AppState.currentIndex = 0;
     renderCurrentQuestion();
   }
 
   function renderCurrentQuestion() {
     isTransitioning = false; 
-    answeredInCurrentQuestion = false;
     if (!AppState.sessionQueue || AppState.sessionQueue.length === 0) return;
     if (AppState.currentIndex >= AppState.sessionQueue.length) AppState.currentIndex = 0;
 
@@ -542,7 +486,7 @@
             <button class="pill-btn" onclick="setArgumentationPoints(3)">3 б</button>
             <button class="pill-btn" onclick="setArgumentationPoints(5)">5 б</button>
           </div>
-          <div id="arg-status" style="margin-top:5px; font-weight:700; color:var(--warning-amber);">Начислено: ${examScore.argPoints} б.</div>
+          <div id="arg-status" style="margin-top:5px; font-weight:700; color:var(--warning-amber);">Решение не оценено</div>
         </div>
       `;
     }
@@ -565,9 +509,8 @@
   }
 
   function handleOptionSelect(selectedIdx, correctIdx, qId, btnElement) {
-    if (isTransitioning || answeredInCurrentQuestion) return;
+    if (isTransitioning) return;
     isTransitioning = true;
-    answeredInCurrentQuestion = true;
 
     AppState.totalAnswered++;
     const allButtons = document.querySelectorAll('.opt-button');
@@ -575,18 +518,14 @@
     if (selectedIdx === correctIdx) {
       AppState.correctCount++;
       if (btnElement) btnElement.classList.add('correct');
+      AudioEngine.playCorrect();
       
-      if (!GlobalMasteredIds.includes(qId)) {
-        GlobalMasteredIds.push(qId);
-      }
+      if (!GlobalMasteredIds.includes(qId)) GlobalMasteredIds.push(qId);
 
       if (isExamMode) {
         const item = AppState.sessionQueue[AppState.currentIndex];
-        if (item.isTaskItem) {
-          examScore.taskPoint = 5; 
-        } else {
-          examScore.testPoints += 1; 
-        }
+        if (item.isTaskItem) examScore.taskPoint = 5; 
+        else examScore.testPoints += 1; 
       }
 
       setTimeout(navigateNext, 350);
@@ -594,6 +533,7 @@
       if (!AppState.errorIds.includes(qId)) AppState.errorIds.push(qId);
       if (btnElement) btnElement.classList.add('wrong');
       if (allButtons[correctIdx]) allButtons[correctIdx].classList.add('correct');
+      AudioEngine.playWrong();
       document.getElementById('legal-hint-card').style.display = 'block';
       setTimeout(() => { isTransitioning = false; }, 1000);
     }
@@ -643,7 +583,7 @@
     if (pool.length === 0) return;
     
     let chosen = pool[Math.floor(Math.random() * pool.length)];
-    AppState.sessionQueue.splice(AppState.currentIndex + 1, 0, { ...chosen, topic: "🔀 Случайный вопрос", isTaskItem: chosen.id >= 500000 });
+    AppState.sessionQueue.splice(AppState.currentIndex + 1, 0, { ...chosen, topic: "🔀 Случайный вопрос", isTaskItem: chosen.id >= 5000 });
     navigateNext();
   }
 
